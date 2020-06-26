@@ -6,6 +6,7 @@ from geopandas.tools import sjoin
 import csv
 import matplotlib.pyplot as plt
 import itertools
+import rasterio
 
 def import_v0(filename, filepath, print_preview=True):
     '''Imports .dat file from version0 into df dataframe
@@ -384,12 +385,48 @@ def fill_elevation(gdf):
             '''
         print("Lets start this DEM stuff :)  ")
         # Check which date range is available for this glacier:
-        # Check if there are any elevations that are NaN or outside of 1000-4800 m - remember index
-        # Check if glacier wide DEMs are available - find them, list which dates, read those that are between/close to the dates we need
-        # if not, read either DHM25 (for measurements before 1980)
+        date_range = (str(gdf.date0.min()), str(gdf.date0.max()))
+        # Check if there are any elevations that are NaN or outside of 1000-4800 m
+        outside_date = [str(int)[:4] for int in\
+                        gdf.loc[(gdf['z-pos'] < 1500) | (gdf['z-pos'] > 4800) | (gdf['z-pos'] == "NaN")]["date0"]]
+        outside_index = gdf.loc[(gdf['z-pos'] < 1500) | (gdf['z-pos'] > 4800)| (gdf['z-pos'] == "NaN")].index
+        print(outside_date, outside_index)
+        # Check if glacier wide DEMs are available - find them, list which dates,
+        # read those that are between/close to the dates we need
+        DEM_dir = r"C:\Users\lea\Documents\data\plots\DEMs"
+        ind_dem = [f for f in os.listdir(DEM_dir) if f.startswith(gdf.Glaciernam[0])]
+        if len(ind_dem) !=0:
+            ind_dem_dates = [date.split("_")[1][:4] for date in ind_dem]
+            aux = []
+            for valor in ind_dem_dates:
+                aux.append(abs(int(date_range[0][:4]) - int(valor)))
+            # index of oldest DEM that we have MB measurements for
+            oldest_dem_ind = aux.index(min(aux))
+
+            # for each entry that needs to be checked, find the index of the dem (dem_ind) that is closest:
+            dem_ind = []
+            for date in outside_date:
+                aux = []
+                for valor in ind_dem_dates:
+                    aux.append(abs(int(date) - int(valor)))
+                dem_ind.append(aux.index(min(aux)))
+
+            dem_ind_unique = list(set(dem_ind))
+            for dem_ind_ind in dem_ind_unique:
+                dem = pd.read_csv(os.path.join(DEM_dir, ind_dem[dem_ind_ind]), sep=r'\\t', engine="python")
+                # now we have dem. now get the entries n entries out of outside_index that have the
+                # a dem_ind that is the same as dem_ind_ind:
+                indices = [i for i, x in enumerate(dem_ind) if x == dem_ind_ind]
+                print(indices)
+                print([outside_index.to_list()[i] for i in indices])
+
+
+
+            # if not, read either DHM25 (for measurements before 1980)
         # or read SwissALti 3D - reproject to LV03
-        # find location of NaN in raster and read elevation --> write into gdf
-        #
+        # find location of NaN,etc in raster and read elevation --> write into gdf
+        # for other point (except ID 5): find elevation of point i DEM, check if it
+        # fits given elevation by +- 100 m
 
 
 def rename_winter_probes(gdf):

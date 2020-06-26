@@ -34,29 +34,32 @@ if __name__ == '__main__':
        # gdf_list_0 = file_handling.pd_to_gpd(DF_list_0)
 
         # Read Excel files into list of pandas dataframes
-        DF_list = [file_handling.import_excel(sheet, fpath, print_preview=False) \
-                   for sheet in [f for f in os.listdir(fpath) \
-                                 if not f.startswith('.')]]
+        #DF_list = [file_handling.import_excel(sheet, fpath, print_preview=False) \
+        #           for sheet in [f for f in os.listdir(fpath) \
+        #                         if not f.startswith('.')]]
         ## Convert to GeoDataFrame and add crs as LV03
-        gdf_list = file_handling.pd_to_gpd(DF_list)
+        #gdf_list = file_handling.pd_to_gpd(DF_list)
 
         # Compare Version 0 and current version:
        # file_handling.compare_v0(gdf_list, gdf_list_0)
 
-    #    gdf_list = gpd.read_file(os.path.join(working_dir, "somethingelse"))
+        # read .shp files from local working directory:
+        gdf_list = [gpd.read_file(os.path.join(working_dir,filename))\
+                    for filename in [f for f in os.listdir(working_dir) \
+                                     if f.endswith(m_type+".shp")]]
 
         #Start data check:
         for i, gdf in enumerate(gdf_list):
             ## 1. Check date/time and date_ID
             #gdf = file_handling.check_date(gdf,m_type)
             ## Print to .shp file as intermediate file:
-            gdf.to_file(os.path.join(working_dir, str(gdf_list[i].Stake[0])[:3]+"_"+ m_type + ".shp"))
+            #gdf.to_file(os.path.join(working_dir, str(gdf_list[i].Stake[0])[:3]+"_"+ m_type + ".shp"))
 
             # Read file again (help for code development)
             ### THIS IS NOT FINISHED YET! Check annual and winter
-            gdf = file_handling.check_geometry(gdf, m_type)
+            #gdf = file_handling.check_geometry(gdf, m_type)
             #gdf = file_handling.adjust_location_ID(gdf, m_type)
-            #gdf = file_handling.fill_elevation(gdf)
+            gdf = file_handling.fill_elevation(gdf)
             print("Doing some fancy corrections here")
 
 
