@@ -3,10 +3,14 @@ import geopandas as gpd
 import os
 import datetime
 from geopandas.tools import sjoin
+from raster2xyz.raster2xyz import Raster2xyz
 import csv
 import matplotlib.pyplot as plt
 import itertools
 import rasterio
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+import numpy as np
+from scipy import spatial
 
 def import_v0(filename, filepath, print_preview=True):
     '''Imports .dat file from version0 into df dataframe
@@ -177,7 +181,7 @@ def check_date(gdf, m_type):
     doy_1 = []
     problematic = []
     for i in range(len(gdf.date0)):
-        if m_type == " annual":
+        if m_type == "annual":
             if str(gdf.date1[i])[4:] != "1001" and \
                     str(gdf.date1[i])[4:] != "0000" and \
                     int(gdf.date1[i]) > 2100:
@@ -236,10 +240,13 @@ def check_date(gdf, m_type):
                         # set generic date 1001
                         if m_type == "annual":
                             gdf.loc[[i], ['date-ID']] = 3
-                            print("Replacing this one: : ", \
+                            try:
+                                print("Replacing this one: : ", \
                                   i, gdf.date0[i], gdf.date1[i], \
                                   gdf.time0[i], gdf.time1[i] , " with ", int(str(gdf.date0[i])[:4]+avg_day1), \
                                   gdf.Stake[i])
+                            except UnboundLocalError:
+                                print("What is wrong?")
                             gdf.loc[[i], ['date0']] = int(str(gdf.date0[i])[:4]+avg_day1)
 
                 else:
@@ -366,40 +373,59 @@ def adjust_location_ID(gdf, m_type):
     # the ID of the later occurence(s) to 4
     print(gdf.Stake[0])
     for ind in range(len(gdf["x-pos"])):
-        if gdf["position-I"][ind] != 4:
+        if gdf["position-ID"][ind] != 4:
             indices = [i for i, x in enumerate(gdf["x-pos"]) if x == gdf["x-pos"][ind]]
 
             if len(indices) > 1:
                 for indices_i in indices[1:]:
-                    gdf.loc[[indices_i], ["position-I"]] = 4
-    print(gdf["position-I"])
+                    gdf.loc[[indices_i], ["position-ID"]] = 4
+    return gdf
 
 def fill_elevation(gdf):
-        '''Fills elevation with NaN/-9999
+    '''Fills elevation with NaN/-9999
         with values read from DEMs. Make a rough quality check
-        for all other values
+        for all other values - values with deviation of more than 150 from SwissAlti3D
+        will be replaced
 
 
             Keyword arguments:
             gdf -- geodataframes
-            '''
-        print("Lets start this DEM stuff :)  ")
-        # Check which date range is available for this glacier:
-        date_range = (str(gdf.date0.min()), str(gdf.date0.max()))
-        # Check if there are any elevations that are NaN or outside of 1000-4800 m
-        outside_date = [str(int)[:4] for int in\
-                        gdf.loc[(gdf['z-pos'] < 1500) | (gdf['z-pos'] > 4800) | (gdf['z-pos'] == "NaN")]["date0"]]
-        outside_index = gdf.loc[(gdf['z-pos'] < 1500) | (gdf['z-pos'] > 4800)| (gdf['z-pos'] == "NaN")].index
-        print(outside_date, outside_index)
-        # Check if glacier wide DEMs are available - find them, list which dates,
-        # read those that are between/close to the dates we need
-        DEM_dir = r"C:\Users\lea\Documents\data\plots\DEMs"
-        ind_dem = [f for f in os.listdir(DEM_dir) if f.startswith(gdf.Glaciernam[0])]
-        if len(ind_dem) !=0:
-            ind_dem_dates = [date.split("_")[1][:4] for date in ind_dem]
+    '''
+    print("Lets start this DEM stuff :)  ")
+    # Check which date range is available for this glacier:
+    DEM_dir = r"C:\Users\lea\Documents\data\plots\DEMs"
+    date_range = (str(gdf.date0.min), str(gdf.date0.max()))
+    ### Overall test of all points: - if deviation is more than 200 m form SwissALti3D,
+    # replace value:
+    # Index of all unique x-pos values for this glacier:
+    dhm_ind = gdf["x-pos"].drop_duplicates().index.to_list()
+    DHM_dir = os.path.join(DEM_dir, "swissAlti3D")
+    ind_dhm = [f for i, f in enumerate(os.listdir(DHM_dir))
+               if (gdf["inv-no"][0][1:] in os.listdir(DHM_dir)[i])]
+    for file in ind_dhm:
+        get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance=True)
+
+    # Check if there are any elevations that are NaN or outside of 1000-4800 m
+    outside_date = [str(i)[:4] for i in gdf[np.isnan(gdf['z-pos']) | \
+                                            (gdf["z-pos"] > 4500) | \
+                                            (gdf["z-pos"] < 1500)]["date0"].to_list()]
+    outside_index = gdf[np.isnan(gdf['z-pos']) | (gdf["z-pos"] > 4500) | (gdf["z-pos"] < 1500)][
+        "z-pos"].index.to_list()
+    # Check if glacier wide DEMs are available - find them, list which dates,
+    # read those that are between/close to the dates we need
+    ind_dem = [f for f in os.listdir(DEM_dir) if f.startswith(gdf.Glaciername[0])]
+    if len(outside_date) != 0:
+        print("There are values that are to be corrected for ", gdf.Stake[0])
+    # only for those entries where we actually need to correct something...
+        ind_dem_dates = [date.split("_")[1][:4] for date in ind_dem]
+        if (len(ind_dem) !=0) and (min([int(i) for i in ind_dem_dates])< 1990):
+        # only do this if we have local DEM - otherwise SWissALti or DHM25
+        # check which dates we have DEMs for: if oldest dem is younger than 1990,
+        # use DHM 25 and SwissAlti instead
+            print("Use local DEMs for: ", gdf.Stake[0])
             aux = []
             for valor in ind_dem_dates:
-                aux.append(abs(int(date_range[0][:4]) - int(valor)))
+                aux.append(abs(min([int(i) for i in outside_date]) - int(valor)))
             # index of oldest DEM that we have MB measurements for
             oldest_dem_ind = aux.index(min(aux))
 
@@ -413,26 +439,228 @@ def fill_elevation(gdf):
 
             dem_ind_unique = list(set(dem_ind))
             for dem_ind_ind in dem_ind_unique:
-                dem = pd.read_csv(os.path.join(DEM_dir, ind_dem[dem_ind_ind]), sep=r'\\t', engine="python")
+                dem = pd.read_csv(os.path.join(DEM_dir, ind_dem[dem_ind_ind]), delim_whitespace=True, engine="python")
+                #dem = pd.read_csv(os.path.join(DEM_dir, ind_dem[dem_ind_ind]), sep='  ', engine="python")
+                dem = dem.fillna(0)
+                # check dimension of dem. If not 3 columns, something went wrong...
+
                 # now we have dem. now get the entries n entries out of outside_index that have the
                 # a dem_ind that is the same as dem_ind_ind:
                 indices = [i for i, x in enumerate(dem_ind) if x == dem_ind_ind]
-                print(indices)
-                print([outside_index.to_list()[i] for i in indices])
+                # now we have all the indices of the points for which this dem is used to fill the z-pos:
+                fill_ind = [outside_index[i] for i in indices]
+                A = dem.iloc[:,:2].to_numpy()
+                for f in fill_ind:
+                    # find index of point in dem that is closest to our point pt for which we need
+                    # add the z-component:
+                    pt = [gdf["x-pos"][f], gdf["y-pos"][f]]
+                    # distance and index of clostest point:
+                    distance, ind = spatial.KDTree(A).query(pt)
+                    # get z-pos of closest point:
+                    z_val = dem.iloc[ind,2]
+                    # write to gdf:
+                    gdf.loc[[f], ['z-pos']] = z_val
 
 
+        elif (min([int(i) for i in outside_date]) < 1900):
+                print("Use DHM25 for :", gdf.Stake[0])
+                # get index of points that need DHM25:
+                dhm_ind = [int(i) for ind, i in enumerate(outside_index) if int(outside_date[ind])< 1990]
+                DHM_dir = os.path.join(DEM_dir, "DHM25", "asc")
+                ind_dhm = [f for f in os.listdir(DHM_dir)
+                       if f.startswith("mm" + str(gdf.lk25[0]))]
+                for file in ind_dhm:
+                    # Read file, convert to xyz
+                    with rasterio.open(os.path.join(DEM_dir, "DHM25", "asc", file)) as src:
+                        image = src.read()
+                        # transform image
+                        bands, rows, cols = np.shape(image)
+                        image1 = image.reshape(rows * cols, bands)
+                        print(np.shape(image1))
+                        # bounding box of image
+                        l, b, r, t = src.bounds
+                        # resolution of image
+                        res = src.res
+                        res = src.res
+                        # meshgrid of X and Y
+                        x = np.arange(l, r, res[0])
+                        y = np.arange(t, b, -res[0])
+                        X, Y = np.meshgrid(x, y)
+                        print(np.shape(X))
+                        # flatten X and Y
+                        newX = np.array(X.flatten('C'))
+                        newY = np.array(Y.flatten('C'))
+                        print(np.shape(newX))
+                        # join XY and Z information
+                        dem = np.column_stack((newX, newY, image1))
+                        A = dem[:, :2]
+                        for f in dhm_ind:
+                            # find index of point in dem that is closest to our point pt for which we need
+                            # add the z-component:
+                            pt = [gdf["x-pos"][f], gdf["y-pos"][f]]
+                            print(pt)
+                            # distance and index of clostest point:
+                            distance, ind = spatial.KDTree(A).query(pt)
+                            # get z-pos of closest point:
+                            z_val = dem[ind, 2]
+                            print(z_val)
+                            # write to gdf:
+                            gdf.loc[[f], ['z-pos']] = z_val
+        else:
+                print("Use Swiss Alti 3D for :", gdf.Stake[0])
+                # get index of points that need Swiss Alti 3D:
+                dhm_ind = [int(i) for ind, i in enumerate(outside_index)
+                           if int(outside_date[ind])>= 1990]
+                DHM_dir = os.path.join(DEM_dir, "swissAlti3D")
+                ind_dhm = [f for i, f in enumerate(os.listdir(DHM_dir))
+                     if (gdf["inv-no"][0] in os.listdir(DHM_dir)[i])]
+                for file in ind_dhm:
+                    get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance= False)
+    return gdf
 
-            # if not, read either DHM25 (for measurements before 1980)
-        # or read SwissALti 3D - reproject to LV03
-        # find location of NaN,etc in raster and read elevation --> write into gdf
-        # for other point (except ID 5): find elevation of point i DEM, check if it
-        # fits given elevation by +- 100 m
+def get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance):
+    """Read SwissAlti*d for glacier, reproject, convert to xyz, find closest value,
+    reads out elevation
+    Params:
+    DEM_dir: dircetory containing SwissAlti3D glacier wide tiles
+    file: filename of SA3D tile that contains glacier (based on Gl-ID)
+    gdf: geopandas dataframe containing all point measurememts for this m_type and glacier
+    dhm_ind: list of index of all points in gdf for which we need to check elevation
+    check_distance: if true, check if current z-val is more than 200 m away from SWA3D,
+    then replace - if false, simply replace the z-value (as it is NaN)
+    """
+    dst_crs = 'EPSG:21781'
+    # Read file, reproject to LV03
+    with rasterio.open(os.path.join(DEM_dir, "swissAlti3D", file)) as src:
+        transform, width, height = calculate_default_transform(
+            src.crs, dst_crs, src.width, src.height, *src.bounds)
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': dst_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+
+        with rasterio.open('RGB.tif', 'w', **kwargs) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=rasterio.band(src, i),
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.nearest)
+
+    # Read file, convert to xyz
+    # with rasterio.open('RGB.tif') as src:
+    #     image = src.read()
+    #     # transform image
+    #     bands, rows, cols = np.shape(image)
+    #     image1 = image.reshape(rows * cols, bands)
+    #     print(image1.shape)
+    #     # bounding box of image
+    #     l, b, r, t = src.bounds
+    #     # resolution of image
+    #     res = src.res
+    #     res = src.res
+    #     if (res[0]< 10):
+    #         res = list(res)
+    #         res[0]=10
+    #     # meshgrid of X and Y
+    #     x = np.arange(l, r, res[0])
+    #     y = np.arange(t, b, -res[0])
+    #     X, Y = np.meshgrid(x, y)
+    #     # flatten X and Y
+    #     newX = np.array(X.flatten('C'))
+    #     newY = np.array(Y.flatten('C'))
+    #     print(newX.shape, newY.shape)
+    #     # join XY and Z information
+    #     try:
+    #         dem = np.column_stack((newX, newY, image1))
+    #     except ValueError:
+    #         print("What is wrong here?")
+    rtxyz = Raster2xyz()
+    rtxyz.translate("RGB.tif", "out_xyz.csv")
+    dem = pd.read_csv("out_xyz.csv", delimiter=",", engine="python")
+    dem = dem.fillna(0).to_numpy()
+
+    A = dem[:, :2]
+    for f in dhm_ind:
+        # find index of point in dem that is closest to our point pt for which we need to
+        # add the z-component:
+        pt = [gdf["x-pos"][f], gdf["y-pos"][f]]
+        # distance and index of clostest point:
+        distance, ind = spatial.KDTree(A).query(pt)
+        # get z-pos of closest point:
+        z_val = dem[ind, 2]
+        if check_distance:
+            # Check if z_val and original z_val are more than 150 m apart - if so, replace, if not, leave
+            dis = abs(z_val - gdf["z-pos"][f])
+            if dis>150:
+                if dis>10000000000000:
+                    print("Discrepancy bigger only because of NaN val ")
+                else:
+                    print("Discrepancy bigger than 150 meter, " , z_val, gdf["z-pos"][f])
+                    gdf.loc[[f], ['z-pos']] = z_val
+                    print("Z-Val and index to be replaced: ", z_val, gdf["x-pos"][f], f)
+                    # Find index of all gdf entries with same position (x-pos) and replace
+                    # z-pos there as well:
+                    for ix in gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist():
+                        if len(gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist()) > 1:
+                            gdf.loc[[ix], ['z-pos']] = z_val
+                            print("Also adjusted z-val for index ", z_val, gdf["x-pos"][ix], ix)
+
+        else:
+            # write to gdf:
+            gdf.loc[[f], ['z-pos']] = z_val
 
 
-def rename_winter_probes(gdf):
-    '''Search winter probes in a radius of 20 meter
-    around summer stakes for same year and rename them accordingly'''
+def rename_winter_probes(gdf_summer, gdf_winter):
+    '''Search winter probes in a radius of 30 meter
+    around summer stakes for same year and rename them accordingly
+    gdf_summer: geodataframe of annual measurements of one glacier
+    gdf_winter: geodataframe of winter measurements of the same glacier
+    '''
+    # For each entry in gdf_summer see if there is entry in gdf_winter
+    # for same year (date0 of summer = year/first4 digits of date1 winter -1)
+    # if so, look which gdf_winter entry is 30 m around --> change name of winter entry to summer entry
+    for i, summ in enumerate(gdf_summer["date0"]):
+        # for each summer entry, check if there are winter entries for the same year:
+        # list of entries of winter entries for same year:
+        ind_list = [i for i,ent in enumerate(gdf_winter["date1"]) if (int(str(ent)[:4])-1) \
+                    == int(str(summ)[:4])]
+        if len(ind_list)>0:
+            print("Lets look for those entries:")
+            # Find/check for points in 30 meter radius
+            x_pos = [gdf_winter["x-pos"][ind] for ind in ind_list]
+            y_pos = [gdf_winter["y-pos"][ind] for ind in ind_list]
+            A = np.column_stack((x_pos, y_pos))
+            pt = [gdf_summer["x-pos"][i], gdf_summer["y-pos"][i]]
+            # distance and index of closest point to this summer point::
+            distance, ind = spatial.KDTree(A).query(pt)
+            if distance < 30:
+                # Rename winter point with summer name:
 
+            # get z-pos of closest point:
+            z_val = dem[ind, 2]
+                if check_distance:
+                    # Check if z_val and original z_val are more than 150 m apart - if so, replace, if not, leave
+                    dis = abs(z_val - gdf["z-pos"][f])
+                    if dis > 150:
+                        if dis > 10000000000000:
+                            print("Discrepancy bigger only because of NaN val ")
+                        else:
+                            print("Discrepancy bigger than 150 meter, ", z_val, gdf["z-pos"][f])
+                            gdf.loc[[f], ['z-pos']] = z_val
+                            print("Z-Val and index to be replaced: ", z_val, gdf["x-pos"][f], f)
+                            # Find index of all gdf entries with same position (x-pos) and replace
+                            # z-pos there as well:
+                            for ix in gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist():
+                                if len(gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist()) > 1:
+                                    gdf.loc[[ix], ['z-pos']] = z_val
+                                    print("Also adjusted z-val for index ", z_val, gdf["x-pos"][ix], ix)
 
 
 if __name__ == '__main__':
