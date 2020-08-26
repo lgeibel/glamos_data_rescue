@@ -51,12 +51,13 @@ def import_v0(filename, filepath, print_preview=True):
     df["Glaciername"] = glacier_list
     return df
 
-def import_excel(filename, filepath, print_preview=True):
+def import_excel(filename, filepath, headerl, print_preview=True):
     '''Imports .xls file into df dataframe
 
     Keyword arguments:
     filename -- name of .xls file
     filepath -- path to folder containing file
+    headerl -- header lines
     print_preview -- if True (default), preview of file is printed
 
     Returns: df
@@ -64,7 +65,7 @@ def import_excel(filename, filepath, print_preview=True):
     '''
     file = os.path.join(filepath, filename)
     print(filename)
-    df = pd.read_excel(file, header=3, \
+    df = pd.read_excel(file, header=headerl, \
                        names=['Stake', 'date0', \
                               'time0', 'date1', 'time1', \
                               'period', 'date-ID', 'x-pos', \
@@ -84,7 +85,7 @@ def import_excel(filename, filepath, print_preview=True):
 
     # Add column with Glacier ID - Read this from .xls file:
     gl_net_info = pd.read_excel(\
-         r"Z:\glazio\projects\8003-VAW_GCOS_data_rescue\gl_net_info.xlsx",
+         r"S:\glazio\projects\8003-VAW_GCOS_data_rescue\gl_net_info.xlsx",
                      header = 1,
          names=['gk-no', 'short', 'lc', 'mb', 'vel', \
                   'name', 'real name', 'inv-no', \
@@ -135,7 +136,9 @@ def pd_to_gpd(df_list):
     :return: gdf_list: list of geodataframes
     '''
     gdf_list = [gpd.GeoDataFrame() for _ in range(len(df_list))]
+
     for i in range(len(df_list)):
+        print(df_list[i]["Stake"])
         # Replace commas with dots and convert to floats:
         if type(df_list[i]['x-pos']) == str:
             df_list[i]['x-pos'] = [x.replace(',', '.') for x in df_list[i]['x-pos']]
@@ -144,8 +147,11 @@ def pd_to_gpd(df_list):
             df_list[i]['y-pos'] = df_list[i]['y-pos'].astype(float)
        # print(df_list[i]['Stake'],df_list[i]['date0'],df_list[i]['x-pos'], df_list[i]['y-pos'])
 
-        gdf_list[i] = gpd.GeoDataFrame(df_list[i],\
+        try:
+            gdf_list[i] = gpd.GeoDataFrame(df_list[i],\
                 geometry=gpd.points_from_xy(df_list[i]['x-pos'], df_list[i]['y-pos']))
+        except TypeError:
+            print("What is wrong?")
         gdf_list[i].crs = {'init': 'epsg:21781'}
     return gdf_list
 
@@ -371,17 +377,21 @@ def adjust_location_ID(gdf, m_type):
     # If same location occurs for other date, leave ID of the first occurence
     # the same and set
     # the ID of the later occurence(s) to 4
-    print(gdf.Stake[0])
-    for ind in range(len(gdf["x-pos"])):
-        if gdf["position-ID"][ind] != 4:
-            indices = [i for i, x in enumerate(gdf["x-pos"]) if x == gdf["x-pos"][ind]]
-
-            if len(indices) > 1:
-                for indices_i in indices[1:]:
-                    gdf.loc[[indices_i], ["position-ID"]] = 4
+    print("Adjusting location IDs for", gdf.Stake[0])
+    duplicateRowsDF = gdf[gdf.duplicated(['x-pos', 'y-pos'])]
+    # Exclude Entries that have same date1 (otherwise GPR does funny stuff):
+    duplicateRowsDF[~duplicateRowsDF.duplicated(["date1"])]
+    for ind in duplicateRowsDF.index:
+        for ind1 in duplicateRowsDF.index:
+            if duplicateRowsDF["x-pos"][ind] == duplicateRowsDF["x-pos"][ind1]:
+                if duplicateRowsDF["y-pos"][ind] == duplicateRowsDF["y-pos"][ind1]:
+                    if duplicateRowsDF["date1"][ind] != duplicateRowsDF["date1"][ind1]:
+                        # exclude values from the same year (only occurs for GPR measurements)
+                        gdf.loc[[ind], ["position-ID"]] = 4
+    print(gdf[gdf["position-ID"] == 4])
     return gdf
 
-def fill_elevation(gdf):
+def fill_elevation(gdf, m_type, gdf5):
     '''Fills elevation with NaN/-9999
         with values read from DEMs. Make a rough quality check
         for all other values - values with deviation of more than 150 from SwissAlti3D
@@ -392,6 +402,8 @@ def fill_elevation(gdf):
             gdf -- geodataframes
     '''
     print("Lets start this DEM stuff :)  ")
+
+
     # Check which date range is available for this glacier:
     DEM_dir = r"C:\Users\lea\Documents\data\plots\DEMs"
     date_range = (str(gdf.date0.min), str(gdf.date0.max()))
@@ -399,23 +411,28 @@ def fill_elevation(gdf):
     # replace value:
     # Index of all unique x-pos values for this glacier:
     dhm_ind = gdf["x-pos"].drop_duplicates().index.to_list()
+
     DHM_dir = os.path.join(DEM_dir, "swissAlti3D")
     ind_dhm = [f for i, f in enumerate(os.listdir(DHM_dir))
                if (gdf["inv-no"][0][1:] in os.listdir(DHM_dir)[i])]
-    for file in ind_dhm:
-        get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance=True)
+#    for file in ind_dhm:
+#        gdf = get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance=True)
 
     # Check if there are any elevations that are NaN or outside of 1000-4800 m
     outside_date = [str(i)[:4] for i in gdf[np.isnan(gdf['z-pos']) | \
                                             (gdf["z-pos"] > 4500) | \
-                                            (gdf["z-pos"] < 1500)]["date0"].to_list()]
+                                            (gdf["z-pos"] < 1500)]["date1"].to_list()]
     outside_index = gdf[np.isnan(gdf['z-pos']) | (gdf["z-pos"] > 4500) | (gdf["z-pos"] < 1500)][
         "z-pos"].index.to_list()
+    # Only check values where version 5 is different than version 4:
+    outside_date = [str(i)[:4] for i in gdf[gdf["z-pos"] != gdf5["z-pos"]]["date1"].to_list()]
+    outside_index = gdf[gdf["z-pos"] != gdf5["z-pos"]]["z-pos"].index.to_list()
+
     # Check if glacier wide DEMs are available - find them, list which dates,
     # read those that are between/close to the dates we need
     ind_dem = [f for f in os.listdir(DEM_dir) if f.startswith(gdf.Glaciername[0])]
     if len(outside_date) != 0:
-        print("There are values that are to be corrected for ", gdf.Stake[0])
+        print("There are values that are to be corrected for ", gdf.Stake[0],outside_index)
     # only for those entries where we actually need to correct something...
         ind_dem_dates = [date.split("_")[1][:4] for date in ind_dem]
         if (len(ind_dem) !=0) and (min([int(i) for i in ind_dem_dates])< 1990):
@@ -438,6 +455,7 @@ def fill_elevation(gdf):
                 dem_ind.append(aux.index(min(aux)))
 
             dem_ind_unique = list(set(dem_ind))
+            # Read this DEM:
             for dem_ind_ind in dem_ind_unique:
                 dem = pd.read_csv(os.path.join(DEM_dir, ind_dem[dem_ind_ind]), delim_whitespace=True, engine="python")
                 #dem = pd.read_csv(os.path.join(DEM_dir, ind_dem[dem_ind_ind]), sep='  ', engine="python")
@@ -459,10 +477,12 @@ def fill_elevation(gdf):
                     # get z-pos of closest point:
                     z_val = dem.iloc[ind,2]
                     # write to gdf:
+                    print("Replacing: ", f, z_val, gdf["z-pos"][f])
+
                     gdf.loc[[f], ['z-pos']] = z_val
 
 
-        elif (min([int(i) for i in outside_date]) < 1900):
+        elif (min([int(i) for i in outside_date]) < 1990):
                 print("Use DHM25 for :", gdf.Stake[0])
                 # get index of points that need DHM25:
                 dhm_ind = [int(i) for ind, i in enumerate(outside_index) if int(outside_date[ind])< 1990]
@@ -503,7 +523,7 @@ def fill_elevation(gdf):
                             distance, ind = spatial.KDTree(A).query(pt)
                             # get z-pos of closest point:
                             z_val = dem[ind, 2]
-                            print(z_val)
+                            print("Replacing: ", z_val, gdf["z-pos"][f])
                             # write to gdf:
                             gdf.loc[[f], ['z-pos']] = z_val
         else:
@@ -514,8 +534,11 @@ def fill_elevation(gdf):
                 DHM_dir = os.path.join(DEM_dir, "swissAlti3D")
                 ind_dhm = [f for i, f in enumerate(os.listdir(DHM_dir))
                      if (gdf["inv-no"][0] in os.listdir(DHM_dir)[i])]
+                if len(ind_dhm)==0:
+                    ind_dhm = [f for i, f in enumerate(os.listdir(DHM_dir))
+                               if (gdf["inv-no"][0][1:] in os.listdir(DHM_dir)[i])]
                 for file in ind_dhm:
-                    get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance= False)
+                    gdf = get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance= False)
     return gdf
 
 def get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance):
@@ -526,8 +549,8 @@ def get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance):
     file: filename of SA3D tile that contains glacier (based on Gl-ID)
     gdf: geopandas dataframe containing all point measurememts for this m_type and glacier
     dhm_ind: list of index of all points in gdf for which we need to check elevation
-    check_distance: if true, check if current z-val is more than 200 m away from SWA3D,
-    then replace - if false, simply replace the z-value (as it is NaN)
+    check_distance: if true, check if current z-val is more than 150 m away from SWA3D,
+                    if not, just replace all NaN z-values
     """
     dst_crs = 'EPSG:21781'
     # Read file, reproject to LV03
@@ -584,6 +607,7 @@ def get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance):
     rtxyz = Raster2xyz()
     rtxyz.translate("RGB.tif", "out_xyz.csv")
     dem = pd.read_csv("out_xyz.csv", delimiter=",", engine="python")
+    dem = dem[dem["z"] > 0]
     dem = dem.fillna(0).to_numpy()
 
     A = dem[:, :2]
@@ -591,6 +615,7 @@ def get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance):
         # find index of point in dem that is closest to our point pt for which we need to
         # add the z-component:
         pt = [gdf["x-pos"][f], gdf["y-pos"][f]]
+        print(f)
         # distance and index of clostest point:
         distance, ind = spatial.KDTree(A).query(pt)
         # get z-pos of closest point:
@@ -607,15 +632,16 @@ def get_SwissAlti3D(DEM_dir, file, gdf, dhm_ind, check_distance):
                     print("Z-Val and index to be replaced: ", z_val, gdf["x-pos"][f], f)
                     # Find index of all gdf entries with same position (x-pos) and replace
                     # z-pos there as well:
-                    for ix in gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist():
+                    for ix in gdf[gdf["x-pos"] == gdf["x-pos"][f] and gdf["y-pos"] == gdf["y-pos"][f]].index.tolist():
                         if len(gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist()) > 1:
                             gdf.loc[[ix], ['z-pos']] = z_val
                             print("Also adjusted z-val for index ", z_val, gdf["x-pos"][ix], ix)
 
         else:
             # write to gdf:
+            print("Replacing ", z_val, gdf["z-pos"][f])
             gdf.loc[[f], ['z-pos']] = z_val
-
+    return gdf
 
 def rename_winter_probes(gdf_summer, gdf_winter):
     '''Search winter probes in a radius of 30 meter
@@ -632,7 +658,6 @@ def rename_winter_probes(gdf_summer, gdf_winter):
         ind_list = [i for i,ent in enumerate(gdf_winter["date1"]) if (int(str(ent)[:4])-1) \
                     == int(str(summ)[:4])]
         if len(ind_list)>0:
-            print("Lets look for those entries:")
             # Find/check for points in 30 meter radius
             x_pos = [gdf_winter["x-pos"][ind] for ind in ind_list]
             y_pos = [gdf_winter["y-pos"][ind] for ind in ind_list]
@@ -640,28 +665,11 @@ def rename_winter_probes(gdf_summer, gdf_winter):
             pt = [gdf_summer["x-pos"][i], gdf_summer["y-pos"][i]]
             # distance and index of closest point to this summer point::
             distance, ind = spatial.KDTree(A).query(pt)
-            if distance < 30:
+            if distance < 100:
                 # Rename winter point with summer name:
+                print("Renaming winter point:", gdf_summer["Stake"][i], gdf_winter.loc[ind_list[ind], ['Stake']])
+                gdf_winter.loc[ind_list[ind], ['Stake']] = gdf_summer["Stake"][i]
 
-            # get z-pos of closest point:
-            z_val = dem[ind, 2]
-                if check_distance:
-                    # Check if z_val and original z_val are more than 150 m apart - if so, replace, if not, leave
-                    dis = abs(z_val - gdf["z-pos"][f])
-                    if dis > 150:
-                        if dis > 10000000000000:
-                            print("Discrepancy bigger only because of NaN val ")
-                        else:
-                            print("Discrepancy bigger than 150 meter, ", z_val, gdf["z-pos"][f])
-                            gdf.loc[[f], ['z-pos']] = z_val
-                            print("Z-Val and index to be replaced: ", z_val, gdf["x-pos"][f], f)
-                            # Find index of all gdf entries with same position (x-pos) and replace
-                            # z-pos there as well:
-                            for ix in gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist():
-                                if len(gdf[gdf["x-pos"] == gdf["x-pos"][f]].index.tolist()) > 1:
-                                    gdf.loc[[ix], ['z-pos']] = z_val
-                                    print("Also adjusted z-val for index ", z_val, gdf["x-pos"][ix], ix)
-
-
+    return gdf_winter
 if __name__ == '__main__':
     print("Use file_handling as module")
