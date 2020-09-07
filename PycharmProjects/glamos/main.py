@@ -28,6 +28,8 @@ if __name__ == '__main__':
     for m_type in type_list:
         fpath = os.path.join(r"Z:\glazio\projects\8003-VAW_GCOS_data_rescue\version4", m_type)
         fpath5 = os.path.join(r"Z:\glazio\projects\8003-VAW_GCOS_data_rescue\version5", m_type)
+        fpath6 = os.path.join(r"Z:\glazio\projects\8003-VAW_GCOS_data_rescue\version5", m_type)
+
 
         fpath_0 = os.path.join(r"Z:\glazio\projects\8003-VAW_GCOS_data_rescue\version0_noduplicates", m_type)
 
@@ -41,9 +43,7 @@ if __name__ == '__main__':
         DF_list = [file_handling.import_excel(sheet, fpath, 3, print_preview=False) \
                    for sheet in [f for f in os.listdir(fpath)]]
                                  #if f.startswith('sanktanna')]]
-        #DF_list = [file_handling.import_excel(sheet, fpath, print_preview=False) \
-        #           for sheet in [f for f in os.listdir(fpath) \
-        #                         if f.startswith('plattalva')]]
+
         # Convert to GeoDataFrame and add crs as LV03
         gdf_list = file_handling.pd_to_gpd(DF_list)
 

@@ -6,6 +6,7 @@ from geopandas.tools import sjoin
 from raster2xyz.raster2xyz import Raster2xyz
 import csv
 import matplotlib.pyplot as plt
+from scipy import stats
 import itertools
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -671,5 +672,18 @@ def rename_winter_probes(gdf_summer, gdf_winter):
                 gdf_winter.loc[ind_list[ind], ['Stake']] = gdf_summer["Stake"][i]
 
     return gdf_winter
+
+def test_deviations(gdf_list):
+    """Test deviations and uncertainties introduced e.g. bei spatial uncertainties, uncertainties in time"""
+    interest = gdf_list[0].iloc[0:1]
+    for gdf in gdf_list:
+        print(interest)
+        interest = interest.append(gdf[(gdf.period > 1)])
+        interest = interest[(interest.period) < 30]
+
+    print(interest)
+
+
+
 if __name__ == '__main__':
     print("Use file_handling as module")

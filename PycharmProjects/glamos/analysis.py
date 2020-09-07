@@ -9,6 +9,7 @@ from sklearn import linear_model, metrics
 import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import OLSInfluence as olsi
 import seaborn as sns
+from plotting import get_timeseries
 
 
 
@@ -229,6 +230,236 @@ def plot_densities(rdf_all):
 
 
     print("What else?")
+
+def plot_density_mean(rdf_all):
+
+    doy_1 = []
+    for i in range(len(rdf_all.date0)):
+        doy_1.append(datetime.datetime.strptime( \
+            str(int(rdf_all.date1[i])), '%Y%m%d').timetuple().tm_yday)
+    rdf_all["doy"] = doy_1
+    df1 = pd.DataFrame(rdf_all.drop(columns='geometry'))
+
+    # exclude None Values (now corrected in Version 5)
+    res = [i for i in range(len(df1.density.to_list())) if df1.density.to_list()[i] == None]
+    bad_df = df1.index.isin(res)
+    df1 = df1[~bad_df]
+    df1['density'] = df1['density'].astype(int)
+
+    df1 = df1[df1["Mass Balan"] > 0] # only use positive balances
+    df1 = df1[df1.density != 400]
+    df1 = df1[df1.density != 450]
+    df1 = df1[df1.density != 500]
+    df1 =  df1[df1.density != 550]
+    df1 = df1[df1. density != 600] # Ignore standard values
+    df1 = df1[df1.density < 900]
+    df1 = df1[df1["z-pos"] < 3800] # exclude
+            # Morteratsch value (by now the ID is changed so no need to worry about it anymore
+    df1 = df1[df1["z-pos"]>1000] # Ignore the faulty Plaine Morte file
+    df1 = df1[~df1["raw_balanc"].isnull()]
+    df1['raw_balanc'] = df1['raw_balanc'].astype(int)
+
+    # Interpolation for measurements after spring
+    #  (DOY >= 160): Use Doy and Elevation
+    X = df1[['doy',
+            'z-pos']]  # here we have 2 variables for multiple regression. If you just want to use one variable for simple linear regression, then use X = df['Interest_Rate'] for example.Alternatively, you may add additional variables within the brackets
+    Y = df1['density']
+
+     # Use statsmodel as its much cooler
+    model = sm.OLS(Y, X).fit()
+    predictions = model.predict(X)
+    print_model = model.summary()
+    # # Calculate Studentized Residuals:
+    # studentized_residuals = olsi(model).resid_studentized
+    # # calculate Cook distance/leverage
+    # cook_dist = dict(olsi(model).cooks_distance[0])
+    # cook_df = pd.DataFrame.from_dict(cook_dist, orient="index")
+    # df1_corr = df1_summer[abs(studentized_residuals) < 2.7]
+    # df1_corr = df1_corr[cook_df < 0.022]
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(24, 15))
+
+
+    all_years_all_glaciers = []
+    for m_type in ["annual", "winter"]:
+        if m_type == "annual":
+            rdf_summer = rdf_all[rdf_all.doy > 180]
+            grouped = rdf_summer.groupby('Glaciernam')
+            gdf_list = [group for _, group in grouped]
+        else:
+            rdf_winter = rdf_all[rdf_all.doy < 180]
+            grouped = rdf_winter.groupby('Glaciernam')
+            gdf_list = [group for _, group in grouped]
+
+
+ #       elif glacier_s["Glaciernam"].iloc[0] == "forno":
+ #           plot_i = glacier_s[glacier_s["z-pos"] > 3000].copy()
+ #       elif glacier_s["Glaciernam"].iloc[0] == "plainemorte":
+ #           plot_i = glacier_s.copy()
+ #       elif glacier_s["Glaciernam"].iloc[0] == "rhone":
+ #           plot_i = glacier_s[(glacier_s["z-pos"] > 2500) & (glacier_s["z-pos"] < 3000)].copy()
+
+
+
+
+        ###########  ANNUAL BALANCE ###########
+        for i, glacier in enumerate(gdf_list):
+            print("Glacier : ",glacier.Glaciernam.iloc[0])
+            # sort by time
+            glacier = glacier.sort_values("date1")
+            # For each glacier, pick first stake/first stakes that we want to look at:
+            glacier_s = glacier
+            plot_i = []
+            glacier["Year"] = [int(str(glacier.date1.iloc[i])[:4]) for i, y in enumerate(glacier.date1)]
+
+            if len(glacier_s) > 0:
+                if glacier["Glaciernam"].iloc[0] == "aletsch":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "ale-PO"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                    # for more stakes per glacier, just add other Stake name here and rerun "get_timeseries"
+                if glacier["Glaciernam"].iloc[0] == "allalin":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "all-AVII"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                    # for more stakes per glacier, just add other Stake name here and rerun "get_timeseries"
+                elif glacier["Glaciernam"].iloc[0] == "albigna":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "alb-T"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                    init_stakes = glacier[glacier.Stake == "alb-O"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "basodino":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "bas-8"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "clariden":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "cla-L"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                    init_stakes = glacier[glacier.Stake == "cla-U"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "findelen":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "fin-1010"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "forno":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "for-D"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "gries":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "grs-111"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "gietro":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "gie-001"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "limmern":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "lim-3"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "silvretta":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "sil-BU"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "rhone":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "rho-0701"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                    init_stakes = glacier[glacier.Stake == "rho-0602"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "pizol":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "pzl-PS"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "plainemorte":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "plm-s2"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+                elif glacier["Glaciernam"].iloc[0] == "stanna":
+                    # define inital stake that starts timeseries
+                    init_stakes = glacier[glacier.Stake == "sta-s30"]
+                    all_years_all_glaciers = get_timeseries(init_stakes, glacier, all_years_all_glaciers)
+
+
+        print("Checking things and plotting now : ")
+        for one_glacier in all_years_all_glaciers:
+            if m_type == "annual":
+                ind = 0
+            elif m_type == "winter":
+                ind = 1
+            print(m_type, ind)
+            one_glacier["density"] = pd.to_numeric(one_glacier["density"])
+            # What happens if one_glacier == "None"?
+            s = axes[ind].plot(one_glacier.date1 / 10000, \
+                             one_glacier["density"] \
+                             - one_glacier[one_glacier.Year<2020]["density"].mean(), \
+                             linestyle="solid", alpha=0.2, \
+                             zorder=2,
+                             label=one_glacier.Glaciernam.iloc[0])
+            s = axes[ind].scatter(one_glacier.date1 / 10000, one_glacier["density"]\
+                                - one_glacier[one_glacier.Year<2020]["density"].mean(), \
+                                s=20, alpha=0.3,zorder=1)
+        # Create Mean value for each year for all glaciers:
+        avg = []
+        for ye in range(1915, 2020, 1):
+            print(ye)
+            lst = ([glacier[glacier.Year == ye].loc[:, "density"].values for glacier in all_years_all_glaciers])
+            i = 0
+            sum = 0
+            for l in lst:
+                if l.size:
+                    if not np.isnan(l).any():
+                        print(l)
+                        sum = sum + l[0]
+                        i = i + 1
+                        print(sum, i)
+                    else:
+                        print(l)
+                        print(sum, i)
+            try:
+                app = sum / i
+            except ZeroDivisionError:
+                app = np.nan
+            avg.append(app)
+        print(avg)
+        avg_li = []
+        # Flatten List
+        for a in avg:
+            print(a)
+            try:
+                avg_li.append(a[0])
+            except TypeError:
+                avg_li.append(np.nan)
+            except  IndexError:
+                avg_li.append(a)
+
+        # Remove mean from all values:
+        avg_me = avg_li - np.nanmean(avg_li)
+        # Compute moving average:
+        mov_avg = pd.Series(avg_me).rolling(5).mean()
+        mov_avg = mov_avg.fillna(method='ffill')
+        if m_type == "winter":
+            print("stop")
+        axes[ind].plot(range(1915, 2020, 1), mov_avg, color = "firebrick", linewidth = 2)
+        plt.sca(axes[ind])  # set the current axes instance to the top left
+        plt.rcParams['axes.labelsize'] = 18
+
+        axes[ind].yaxis.grid(color='gray', linestyle='dashed')
+        axes[ind].xaxis.grid(color='gray', linestyle='dashed')
+        axes[ind].set(xlabel="Year", ylabel="Density in kg/m3")
+        for label in (axes[ind].get_xticklabels() + axes[ind].get_yticklabels()):
+            label.set_fontsize(16)
+            #axes[0].set_xlim(1954, 2020)
+        axes[0].legend(loc="upper left")
+        axes[1].legend(loc="upper left")
+        axes[0].set_title('Mean of Annual Density Measurements', size=16)
+        axes[ind].tick_params(axis='both', which='major', labelsize=16)
+        axes[1].set_title('Mean of Winter Density Measuremens', size=16)
+
+
+
+
 
 
 def interpolate_densities(model, gdf_list, m_type):

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import geopandas as gpd
 
 import file_handling
-from analysis import density_analysis, plot_densities, interpolate_densities
+from analysis import density_analysis, plot_densities, interpolate_densities, plot_density_mean
 
 
 fname = "aletsch_annual_ordered.xlsx"
@@ -56,6 +56,7 @@ if __name__ == '__main__':
 #     rdf_all.to_file(os.path.join(working_dir, 'measures_densities.txt', 'measures_densities.shp'))
 
     rdf_all = gpd.read_file(os.path.join(working_dir, 'measures_densities.txt', 'measures_densities.shp'))
+    plot_density_mean(rdf_all)
     model, predictions = plot_densities(rdf_all)
 
     print("So what now?")

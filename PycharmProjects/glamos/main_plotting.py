@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import geopandas as gpd
 
 import file_handling
-from plotting import plot_map, plot_timeline, plot_histogram, plot_massbalance
+from plotting import plot_map, plot_timeline, plot_histogram, plot_massbalance_mean, plot_massbalance_individual
 
 
 fname = "aletsch_annual_ordered.xlsx"
@@ -24,38 +24,53 @@ working_dir = r"C:\Users\lea\Documents\data\working_dir\intermediate_steps"
 if __name__ == '__main__':
 # First run with all annual files:
 # define which type of measurements:
-    type_list = ["annual", "winter"]
+    type_list = ["intermediate", "winter"]
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(24, 15))
+    fig1, axes1 = plt.subplots(nrows=4, ncols=2,sharex=True, figsize=(24, 15))
     for m_type in type_list:
         fpath = os.path.join(r"Z:\glazio\projects\8003-VAW_GCOS_data_rescue\version4", m_type)
         fpath6 = os.path.join(r"S:\glazio\projects\8003-VAW_GCOS_data_rescue\version6", m_type)
 
         fpath_0 = os.path.join(r"Z:\glazio\projects\8003-VAW_GCOS_data_rescue\version0_noduplicates", m_type)
 
-        # Read version0 into list of dataframes as well:
-       # DF_list_0 = [file_handling.import_v0(sheet, fpath_0, print_preview = False) \
-       #            for sheet in [f for f in os.listdir(fpath_0) \
-       #                          if not f.startswith('.')]]
-       # gdf_list_0 = file_handling.pd_to_gpd(DF_list_0)
-
         #Read Excel files into list of pandas dataframes
-        DF_list = [file_handling.import_excel(sheet, fpath6, 0, print_preview=False) \
-                    for sheet in ["aletsch_annual.xlsx",
-                                  "clariden_annual.xlsx",
-                                  "untgrindelwald_annual.xlsx",
-                                  "gries_annual.xlsx",
-                                  "silvretta_annual.xlsx"
-                                #   Limmern?
+        if m_type == "annual":
+            DF_list = [file_handling.import_excel(sheet, fpath6, 0, print_preview=False) \
+                    for sheet in ["aletsch_" +m_type+".xlsx",
+                                  "allalin_" + m_type + ".xlsx",
+                                  "basodino_" + m_type + ".xlsx",
+                                  "clariden_" +m_type+".xlsx",
+                                  #"untgrindelwald_annual.xlsx",
+                                  "gietro_" + m_type + ".xlsx",
+                                  "gries_" +m_type+".xlsx",
+                                  "silvretta_" +m_type+".xlsx"
                                 # Allalin (P1), Hohlaub (P2), Gietro (P1, P3, P5)
                                 # , Rhone
                                   ]]
+
+        elif m_type == "winter":
+            DF_list = [file_handling.import_excel(sheet, fpath6, 0, print_preview=False) \
+                    for sheet in ["aletsch_" +m_type+".xlsx",
+                                  "allalin_" + m_type + ".xlsx",
+                                  "basodino_" + m_type + ".xlsx",
+                                  "clariden_" +m_type+".xlsx",
+                                  #"untgrindelwald_annual.xlsx",
+                                  "gries_" +m_type+".xlsx",
+                                  "silvretta_" +m_type+".xlsx",
+                                # Allalin (P1), Hohlaub (P2), Gietro (P1, P3, P5)
+                                # , Rhone
+                                  ]]
+        else:
+            DF_list = [file_handling.import_excel(sheet, fpath6, 0, print_preview=False) \
+                       for sheet in [f for f in os.listdir(fpath6)]]
+
         # Convert to GeoDataFrame and add crs as LV03
         gdf_list = file_handling.pd_to_gpd(DF_list)
-        plot_massbalance(gdf_list)
+        file_handling.test_deviations(gdf_list)
+        #plot_massbalance_mean(gdf_list, m_type, axes)
+        #plot_massbalance_individual(gdf_list, m_type, fig1, axes1)
 
-
-
-
-
+    #plt.show()
 
 
     if m_type == "winter":
@@ -70,7 +85,7 @@ if __name__ == '__main__':
                             for filename in [f for f in os.listdir(working_dir) \
                                              if f.endswith("intermediate.shp")]]
 
-        print("Let's do some fancy ass plots:")
+        print("Let's do some fancy plots:")
         plot_map(gdf_list_summer, gdf_list_intermediate, gdf_list_winter)
         #plot_timeline(gdf_list_summer, gdf_list_intermediate, gdf_list_winter)
         #plot_histogram(gdf_list_summer, gdf_list_intermediate, gdf_list_winter)
